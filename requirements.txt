@@ -1,26 +1,26 @@
 matplotlib
-scipy
+# scipy
 numpy
-numba
+# numba
 pystac_client
 planetary_computer
 shapely
 ipywidgets
 rioxarray
 jupyter
-seaborn
+# seaborn
 ipykernel
-ipympl
-ipyleaflet
+# ipympl
+# ipyleaflet
 pandas
-tqdm
-netCDF4
-pcse
-git+https://github.com/jgomezdans/GomezEngine.git
-git+https://github.com/jgomezdans/gp_emulator.git
-prosail
+# tqdm
+# netCDF4
+# pcse
+# git+https://github.com/jgomezdans/GomezEngine.git
+# git+https://github.com/jgomezdans/gp_emulator.git
+# prosail
 geopandas
-geogif
-stackstac
-boto3
-odc-stac
+# geogif
+# stackstac
+# boto3
+# odc-stac
