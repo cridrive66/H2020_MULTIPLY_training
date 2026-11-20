@@ -492,6 +492,9 @@ def do_index(
     return s, vi
 
 
+_red_edge_fig = None
+
+
 def red_edge_playground():
     np.seterr(divide="ignore", invalid="ignore")
     _ = widgets.interact_manual(
@@ -604,7 +607,15 @@ def red_edge(
     red_edge = []
     rred_edge = []
     unc = []
-    fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(6.47 * 1.62, 6.47))
+    # Drop the figure from the previous run and create the new one with
+    # interactive mode off, so ipympl doesn't queue it for an automatic second
+    # display on top of the explicit ``display`` call below.
+    global _red_edge_fig
+    if _red_edge_fig is not None:
+        plt.close(_red_edge_fig)
+    with plt.ioff():
+        fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(6.47 * 1.62, 6.47))
+    _red_edge_fig = fig
     for ii, s in enumerate(
         np.linspace(minvals[sweep_param], maxvals[sweep_param], num=spaces)
     ):
@@ -1135,9 +1146,12 @@ def prosail_sensitivity(
 
     if do_plots:
         wv = np.arange(400, 2501)
-        fig1, axs = plt.subplots(
-            nrows=4, ncols=3, figsize=(6.47, 6.47), sharex=True
-        )
+        # Create figures with interactive mode off so ipympl doesn't queue them
+        # for an automatic display on top of the explicit ``display`` calls below.
+        with plt.ioff():
+            fig1, axs = plt.subplots(
+                nrows=4, ncols=3, figsize=(6.47, 6.47), sharex=True
+            )
         axs = axs.flatten()
         for i, input_parameter in enumerate(
             [
@@ -1166,7 +1180,8 @@ def prosail_sensitivity(
             # pretty_axes ( axs[i] )
             # axs[i].set_ylim(-0.5, 0.5)
         fig1.tight_layout()
-        fig2 = plt.figure(figsize=(6.47, 4))
+        with plt.ioff():
+            fig2 = plt.figure(figsize=(6.47, 4))
         for i, input_parameter in enumerate(
             [
                 "n",
@@ -1315,24 +1330,27 @@ def canopy_mtci_exp_gui():
         ]
     )
 
-    def on_toggle(**values):
-        nuisance = [p for p in parameters if values[p]]
-        obs_noise = values["obs_unc"]
-        sza = values["SZA"]
-        vza = values["VZA"]
-        raa = values["RAA"]
-        bwidth = values["bwidth"]
-        _ = mtci_experiment(
-            nuisance=nuisance,
-            noise_level=obs_noise,
-            sza=sza,
-            vza=vza,
-            raa=raa,
-            bwidth=bwidth,
-        )
+    run_button = widgets.Button(
+        description="Run Interact", button_style="primary"
+    )
+    interact_out = widgets.Output()
 
-    interact_out = widgets.interactive_output(on_toggle, some_buttons)
-    display(gui_disp, interact_out)
+    def on_button_click(b):
+        plt.close("all")
+        with interact_out:
+            interact_out.clear_output(wait=True)
+            _ = mtci_experiment(
+                nuisance=[p for p in parameters if some_buttons[p].value],
+                noise_level=some_pars["obs_unc"].value,
+                sza=some_pars["SZA"].value,
+                vza=some_pars["VZA"].value,
+                raa=some_pars["RAA"].value,
+                bwidth=some_pars["bwidth"].value,
+            )
+
+    run_button.on_click(on_button_click)
+    display(widgets.VBox([gui_disp, run_button, interact_out]))
+    on_button_click(None)
 
 
 def mtci_experiment(
@@ -1486,7 +1504,10 @@ def mtci_experiment(
     rr = np.corrcoef(cab_axis, np.polyval(p, MTCI))[0, 1]
 
     if do_plots:
-        fig1 = plt.figure(figsize=(6.47, 4))
+        # Interactive mode off so ipympl doesn't queue the figure for a second,
+        # automatic display on top of the explicit ``display`` call below.
+        with plt.ioff():
+            fig1 = plt.figure(figsize=(6.47, 4))
         plt.plot(MTCI, cab_axis, "o", markerfacecolor="none")
         plt.ylabel("Leaf chlorophyll concentration")
         plt.xlabel("MTCI")
@@ -1539,20 +1560,27 @@ def plot_vi_space(v, r, n, the_vi):
         vi = (1 + L) * (N - R) / (N + R + L)
         vix = (1 + L) * (n - r) / (n + r + L)
     elif the_vi == "OSAVI":
-        vi = 1.16 * (N / R) / (R + N + 0.16)
-        vix = 1.16 * (n / r) / (r + n + 0.16)
+        vi = 1.16 * (N - R) / (R + N + 0.16)
+        vix = 1.16 * (n - r) / (r + n + 0.16)
     else:
         raise ValueError("We only deal with NDVI, SAVI or OSAVI")
 
-    fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(13, 4))
+    # Interactive mode off so ipympl doesn't queue the figure for a second,
+    # automatic display on top of the explicit ``display`` call below.
+    with plt.ioff():
+        fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(13, 4))
     axs = axs.flatten()
     CS = axs[0].contour(R, N, vi, 6, colors="k")
     axs[0].clabel(CS, fontsize=9, inline=1)
     axs[0].scatter(r, n, c=v, cmap=plt.cm.Greens)
+    axs[0].set_xlabel("Red reflectance")
+    axs[0].set_ylabel("NIR reflectance")
 
     axs[1].plot(v, vix, "o")
     axs[1].set_xlabel("value")
     axs[1].set_ylabel(the_vi)
+    fig.tight_layout()
+    display(fig.canvas)
 
 
 def canopy_vi_exp_gui():
@@ -1625,25 +1653,31 @@ def canopy_vi_exp_gui():
         ]
     )
 
-    def on_toggle(**values):
-        nuisance = [p for p in parameters if values[p]]
-        obs_noise = values["obs_unc"]
-        sza = values["SZA"]
-        vza = values["VZA"]
-        raa = values["RAA"]
-        veg_index = values["index"]
+    run_button = widgets.Button(
+        description="Run Interact", button_style="primary"
+    )
+    interact_out = widgets.Output()
 
-        _ = canopy_vi_expt(
-            nuisance=nuisance,
-            obs_noise=obs_noise,
-            sza=sza,
-            vza=vza,
-            raa=raa,
-            vin=veg_index,
-        )
+    def on_button_click(b):
+        plt.close("all")
+        with interact_out:
+            interact_out.clear_output(wait=True)
+            nuisance = [p for p in parameters if some_buttons[p].value]
+            if not nuisance:
+                print("Select at least one parameter to vary.")
+                return
+            _ = canopy_vi_expt(
+                nuisance=nuisance,
+                obs_noise=some_pars["obs_unc"].value,
+                sza=some_pars["SZA"].value,
+                vza=some_pars["VZA"].value,
+                raa=some_pars["RAA"].value,
+                vin=some_pars["index"].value,
+            )
 
-    interact_out = widgets.interactive_output(on_toggle, some_buttons)
-    display(gui_disp, interact_out)
+    run_button.on_click(on_button_click)
+    display(widgets.VBox([gui_disp, run_button, interact_out]))
+    on_button_click(None)
 
 
 def canopy_vi_expt(
@@ -1738,7 +1772,7 @@ def canopy_vi_expt(
     red_pass = np.logical_and(
         wv >= (650 - bwidth_r), wv <= (650 + bwidth_r)
     )  # (wv == 650 )
-    nir_pass = np.logical_and(wv >= (865 - bwidth_r), wv <= (865 + bwidth_r))
+    nir_pass = np.logical_and(wv >= (865 - bwidth_n), wv <= (865 + bwidth_n))
     param_names = [
         "n",
         "cab",
