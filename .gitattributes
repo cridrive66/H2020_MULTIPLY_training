@@ -1,0 +1,12 @@
+# Normalize text and notebook files to LF line endings across Windows/Mac/Linux
+* text=auto eol=lf
+*.ipynb text eol=lf
+
+# Keep binary files untouched
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.xlsx binary
+*.zip binary
