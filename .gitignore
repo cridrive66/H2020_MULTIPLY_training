@@ -102,3 +102,7 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# My_Notes folder for the students
+My_Notes/*
+!My_Notes/README.md
