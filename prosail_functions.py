@@ -877,7 +877,7 @@ def prosail_sensitivity_gui():
     maxvals = {
         "n": 2.5, "cab": 80.0, "car": 20.0, "ant": 40, "cbrown": 1.0,
         "cw": 0.04, "cm": 0.5, "lai": 8.05, "lidf": 90.0, "rsoil": 2.0,
-        "psoil": 2.0, "hspot": 0.5,
+        "psoil": 1.0, "hspot": 0.5,
     }
     vals = {
         "n": 2.1, "cab": 30.0, "car": 16.0, "ant": 8, "cbrown": 0.0,
@@ -1261,9 +1261,9 @@ def hspot(h, theta):
 
 
 def canopy_mtci_exp_gui():
+    # Cab is always swept (it is the quantity we try to retrieve), so it has no button
     parameters = [
         "n",
-        "cab",
         "car",
         "ant",
         "cbrown",
@@ -1279,11 +1279,49 @@ def canopy_mtci_exp_gui():
     #                   "leaf_cbrown", "leaf_cw", "leaf_cm", "lai", "ala",
     #                   "rsoil", "psoil", "hspot", "sza", "vza", "raa"]
     some_buttons = {
-        k: widgets.ToggleButton(description=k, value=False)
+        k: widgets.ToggleButton(
+            description="vary randomly",
+            value=False,
+            layout=widgets.Layout(width="110px"),
+        )
         for k in parameters
-        if k != "cab"
     }
-    some_buttons["cab"] = widgets.ToggleButton(description="cab", value=True)
+    # Fixed value (x0) used when a parameter is not varied randomly: (min, max, default, step)
+    x0_ranges = {
+        "n": (1.0, 2.5, 1.5, 0.01),
+        "car": (0.0, 20.0, 5.0, 0.1),
+        "ant": (0.0, 40.0, 8.0, 0.1),
+        "cbrown": (0.0, 1.0, 0.0, 0.01),
+        "cw": (0.001, 0.04, 0.0113, 0.0001),
+        "cm": (0.0, 0.03, 0.0053, 0.0001),
+        "lai": (0.5, 8.0, 6.0, 0.1),
+        "lidf": (0.0, 90.0, 30.0, 1.0),
+        "rsoil": (0.0, 2.0, 1.0, 0.01),
+        "psoil": (0.0, 1.0, 1.0, 0.01),
+        "hspot": (0.0001, 0.5, 0.01, 0.001),
+    }
+    x0_sliders = {
+        k: widgets.FloatSlider(
+            min=lo,
+            max=hi,
+            value=v,
+            step=st,
+            description=k,
+            readout_format=".4g",
+            continuous_update=False,
+            layout=widgets.Layout(width="320px"),
+        )
+        for k, (lo, hi, v, st) in x0_ranges.items()
+    }
+    # A parameter varied randomly ignores its x0 slider, so grey it out
+    for k in parameters:
+        some_buttons[k].observe(
+            lambda change, k=k: setattr(x0_sliders[k], "disabled", change["new"]),
+            names="value",
+        )
+
+    def par_row(k):
+        return widgets.HBox([x0_sliders[k], some_buttons[k]])
 
     some_pars = {
         "SZA": widgets.FloatSlider(min=0, max=90, value=0, description="SZA"),
@@ -1305,24 +1343,18 @@ def canopy_mtci_exp_gui():
 
     gui_disp = widgets.VBox(
         [
-            widgets.HBox(
-                [some_buttons["n"], some_buttons["cab"], some_buttons["car"]]
+            widgets.HTML(
+                "<b>Cab always varies</b> (it is what we want to retrieve). "
+                "Every other parameter is fixed at the value of its slider (x0), "
+                "unless <i>vary randomly</i> is selected: then it is drawn "
+                "randomly within its bounds and the slider is ignored."
             ),
-            widgets.HBox(
-                [
-                    some_buttons["cbrown"],
-                    some_buttons["cw"],
-                    some_buttons["cm"],
-                ]
-            ),
-            widgets.HBox(
-                [
-                    some_buttons["lai"],
-                    some_buttons["lidf"],
-                    some_buttons["hspot"],
-                ]
-            ),
-            widgets.HBox([some_buttons["rsoil"], some_buttons["psoil"]]),
+            widgets.HBox([par_row("n"), par_row("car")]),
+            widgets.HBox([par_row("ant"), par_row("cbrown")]),
+            widgets.HBox([par_row("cw"), par_row("cm")]),
+            widgets.HBox([par_row("lai"), par_row("lidf")]),
+            widgets.HBox([par_row("rsoil"), par_row("psoil")]),
+            widgets.HBox([par_row("hspot")]),
             widgets.HBox(
                 [some_pars["SZA"], some_pars["VZA"], some_pars["RAA"]]
             ),
@@ -1339,7 +1371,13 @@ def canopy_mtci_exp_gui():
         plt.close("all")
         with interact_out:
             interact_out.clear_output(wait=True)
+            # PROSAIL order; the Cab entry (index 1) is overwritten by the sweep
+            x0 = np.array(
+                [40.0 if p == "cab" else x0_sliders[p].value
+                 for p in ["n", "cab"] + parameters[1:]]
+            )
             _ = mtci_experiment(
+                x0=x0,
                 nuisance=[p for p in parameters if some_buttons[p].value],
                 noise_level=some_pars["obs_unc"].value,
                 sza=some_pars["SZA"].value,
@@ -1382,7 +1420,7 @@ def mtci_experiment(
         "lai": 8.05,
         "lidf": 90.0,
         "rsoil": 2.0,
-        "psoil": 2.0,
+        "psoil": 1.0,
         "hspot": 0.5,
     },
     bwidth=10,
@@ -1450,51 +1488,37 @@ def mtci_experiment(
         "psoil",
         "hspot",
     ]
-    if isinstance(nuisance, str) and (nuisance in param_position):
-        nuisance = list(nuisance)
-    elif isinstance(nuisance, (list, tuple)):
-        for x in nuisance:
-            if x not in param_position:
-                raise ValueError("%s is not a PROSAIL parameter!" % x)
+    if isinstance(nuisance, str):
+        nuisance = [nuisance]
+    nuisance = [] if nuisance is None else list(nuisance)
+    for x in nuisance:
+        if x not in param_position:
+            raise ValueError("%s is not a PROSAIL parameter!" % x)
+    # Cab is always swept in this experiment, so it is not a nuisance parameter
+    nuisance = [p for p in nuisance if p != "cab"]
 
+    # MTCI = (R753 - R705) / (R705 - R681), each band averaged over +/- bwidth nm
     wv = np.arange(400, 2501)
     band8_pass = np.logical_and(wv >= (681 - bwidth), wv <= (681 + bwidth))
-    band9_pass = np.logical_and(wv >= (709 - bwidth), wv <= (709 + bwidth))
-    band10_pass = np.logical_and(wv >= (865 - bwidth), wv <= (865 + bwidth))
+    band9_pass = np.logical_and(wv >= (705 - bwidth), wv <= (705 + bwidth))
+    band10_pass = np.logical_and(wv >= (753 - bwidth), wv <= (753 + bwidth))
     MTCI = []
     xp = x0 * 1.0
     cab_axis = []
     for n_tries in range(n_tries):
         for cab in np.arange(20, 100, 5):
             cab = cab + 5.0 * (np.random.rand() - 0.5)
-            if nuisance is None:  # No flipping parameters around
-                xp[1] = cab
-                r = call_prosail(*(xp.tolist() + [sza, vza, raa]))
-                r8 = r[band8_pass].mean() + np.random.randn() * noise_level
-                r9 = r[band9_pass].mean() + np.random.randn() * noise_level
-                r10 = r[band10_pass].mean() + np.random.randn() * noise_level
-                mtci = (r10 - r9) / (r9 - r8)
-                MTCI.append(mtci)
-                cab_axis.append(cab)
-            else:
-                for nuisance_parameter in nuisance:
-                    delta = (
-                        maxvals[nuisance_parameter]
-                        - minvals[nuisance_parameter]
-                    )
-                    ip = param_position.index(nuisance_parameter)
-
-                    s = minvals[nuisance_parameter] + np.random.rand() * delta
-                    xp[ip] = s
-
-                xp[1] = cab
-                r = call_prosail(*(xp.tolist() + [sza, vza, raa]))
-                r8 = r[band8_pass].sum() + np.random.randn() * noise_level
-                r9 = r[band9_pass].sum() + np.random.randn() * noise_level
-                r10 = r[band10_pass].sum() + np.random.randn() * noise_level
-                mtci = (r10 - r9) / (r9 - r8)
-                MTCI.append(mtci)
-                cab_axis.append(cab)
+            for nuisance_parameter in nuisance:
+                delta = maxvals[nuisance_parameter] - minvals[nuisance_parameter]
+                ip = param_position.index(nuisance_parameter)
+                xp[ip] = minvals[nuisance_parameter] + np.random.rand() * delta
+            xp[1] = cab
+            r = call_prosail(*(xp.tolist() + [sza, vza, raa]))
+            r8 = r[band8_pass].mean() + np.random.randn() * noise_level
+            r9 = r[band9_pass].mean() + np.random.randn() * noise_level
+            r10 = r[band10_pass].mean() + np.random.randn() * noise_level
+            MTCI.append((r10 - r9) / (r9 - r8))
+            cab_axis.append(cab)
     MTCI = np.array(MTCI)
     mtci_passer = np.logical_and(MTCI > 0.01, MTCI < 50)
     MTCI = MTCI[mtci_passer]
@@ -1511,7 +1535,7 @@ def mtci_experiment(
         plt.plot(MTCI, cab_axis, "o", markerfacecolor="none")
         plt.ylabel("Leaf chlorophyll concentration")
         plt.xlabel("MTCI")
-        if nuisance is None:
+        if not nuisance:
             plt.title(
                 "Fit: %g*MTCI +%g; R2=%g" % (p[0], p[1], rr * rr), fontsize=10
             )
@@ -1522,27 +1546,38 @@ def mtci_experiment(
                 fontsize=10,
             )
 
-        plt.plot([0, 10], np.polyval(p, [0, 10]), "--")
-    fig1.tight_layout()
-    display(fig1.canvas)
+        mtci_range = np.array([MTCI.min(), MTCI.max()])
+        plt.plot(mtci_range, np.polyval(p, mtci_range), "--")
+        fig1.tight_layout()
+        display(fig1.canvas)
     return cab_axis, np.array(MTCI), p[0], p[1]
 
 
-def plot_vi_space(v, r, n, the_vi):
-    """Plots vegetation index RED/NIR space for a particular VI of those considered (NDVI, SAVI and OSAVI),
-    and plot a colour shaded scatter plot of a set of points over RED/NIR space, the colour given by the
-    value of `v`.
+def plot_vi_space(x, r, n, the_vi, params, colour_by, param_names):
+    """Plots the RED/NIR space for a particular VI (NDVI, SAVI or OSAVI) next to a grid of
+    "parameter vs VI" panels, one for each of the randomised parameters.
+
+    The left plot is a scatter plot of the red and nir reflectances, coloured by the value of
+    the parameter ``colour_by``, over the contours of the VI. On the right there is one panel for
+    each parameter in ``params``, showing the VI against the value of that parameter. The rest of
+    the randomised parameters act as noise in each panel.
 
     Parameters
     ---------------
-    v: array
-        The value associated to each `r` and ``n`` (e.g. LAI)
+    x: array
+        An array of shape (n_simulations, len(param_names)) with the parameters of each simulation
     r: array
         Reflectance in the red band
     n: array
         Reflectance in the nir band
     the_vi: str
         The vegetation index to calculate. MUST be one of NDVI, SAVI or OSAVI, else raises Exception
+    params: list
+        The names of the randomised parameters. One panel is drawn for each of them.
+    colour_by: str
+        The parameter (one of ``params``) used to colour the red/nir scatter plot
+    param_names: list
+        The names of the columns of ``x``
 
     Returns
     --------
@@ -1565,20 +1600,39 @@ def plot_vi_space(v, r, n, the_vi):
     else:
         raise ValueError("We only deal with NDVI, SAVI or OSAVI")
 
+    n_panels = len(params)
+    ncols = 1 if n_panels == 1 else (2 if n_panels <= 4 else 3)
+    nrows = int(np.ceil(n_panels / ncols))
+
     # Interactive mode off so ipympl doesn't queue the figure for a second,
     # automatic display on top of the explicit ``display`` call below.
     with plt.ioff():
-        fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(13, 4))
-    axs = axs.flatten()
-    CS = axs[0].contour(R, N, vi, 6, colors="k")
-    axs[0].clabel(CS, fontsize=9, inline=1)
-    axs[0].scatter(r, n, c=v, cmap=plt.cm.Greens)
-    axs[0].set_xlabel("Red reflectance")
-    axs[0].set_ylabel("NIR reflectance")
+        fig = plt.figure(figsize=(5.5 + 3.5 * ncols, max(4.0, 3.0 * nrows)))
+    outer = fig.add_gridspec(1, 2, width_ratios=[1.0, 0.7 * ncols])
+    ax_rn = fig.add_subplot(outer[0])
+    inner = outer[1].subgridspec(nrows, ncols)
 
-    axs[1].plot(v, vix, "o")
-    axs[1].set_xlabel("value")
-    axs[1].set_ylabel(the_vi)
+    CS = ax_rn.contour(R, N, vi, 6, colors="k")
+    ax_rn.clabel(CS, fontsize=9, inline=1)
+    sc = ax_rn.scatter(
+        r, n, c=x[:, param_names.index(colour_by)], cmap=plt.cm.viridis, s=10
+    )
+    fig.colorbar(sc, ax=ax_rn, label=colour_by)
+    ax_rn.set_xlabel("Red reflectance")
+    ax_rn.set_ylabel("NIR reflectance")
+    ax_rn.set_title("Coloured by %s" % colour_by)
+
+    first_ax = None
+    for i, p in enumerate(params):
+        ax = fig.add_subplot(inner[i // ncols, i % ncols], sharey=first_ax)
+        if first_ax is None:
+            first_ax = ax
+        ax.plot(x[:, param_names.index(p)], vix, "o", ms=2, alpha=0.4)
+        ax.set_xlabel(p)
+        if i % ncols == 0:
+            ax.set_ylabel(the_vi)
+        else:
+            ax.tick_params(labelleft=False)
     fig.tight_layout()
     display(fig.canvas)
 
@@ -1653,36 +1707,85 @@ def canopy_vi_exp_gui():
         ]
     )
 
+    # Colour of the red/nir scatter plot. Its options are the parameters used in the
+    # last run, and they are only updated when "Run Interact" is clicked.
+    colour_dd = widgets.Dropdown(options=[], description="Colour by")
+    updating = {"busy": False}
+
     run_button = widgets.Button(
         description="Run Interact", button_style="primary"
     )
     interact_out = widgets.Output()
+    last_run = {}
 
-    def on_button_click(b):
+    def draw():
+        # Plots the stored simulations, so changing the colour needs no new simulations
         plt.close("all")
         with interact_out:
             interact_out.clear_output(wait=True)
-            nuisance = [p for p in parameters if some_buttons[p].value]
-            if not nuisance:
-                print("Select at least one parameter to vary.")
-                return
-            _ = canopy_vi_expt(
-                nuisance=nuisance,
-                obs_noise=some_pars["obs_unc"].value,
-                sza=some_pars["SZA"].value,
-                vza=some_pars["VZA"].value,
-                raa=some_pars["RAA"].value,
-                vin=some_pars["index"].value,
+            plot_vi_space(
+                last_run["x"],
+                last_run["red"],
+                last_run["nir"],
+                last_run["vin"],
+                last_run["params"],
+                colour_dd.value,
+                last_run["param_names"],
             )
 
+    def on_colour_change(change):
+        # Only the colour menu redraws; changing the toggles does nothing until a new run
+        if last_run and not updating["busy"] and change["new"] is not None:
+            draw()
+
+    colour_dd.observe(on_colour_change, names="value")
+
+    def on_button_click(b):
+        plt.close("all")
+        nuisance = [p for p in parameters if some_buttons[p].value]
+        if not nuisance:
+            last_run.clear()
+            updating["busy"] = True
+            colour_dd.options = []
+            updating["busy"] = False
+            with interact_out:
+                interact_out.clear_output(wait=True)
+                print("Select at least one parameter to vary.")
+            return
+        x, red, nir = canopy_vi_expt(
+            nuisance=nuisance,
+            obs_noise=some_pars["obs_unc"].value,
+            sza=some_pars["SZA"].value,
+            vza=some_pars["VZA"].value,
+            raa=some_pars["RAA"].value,
+            vin=some_pars["index"].value,
+            do_plots=False,
+        )
+        last_run.update(
+            x=x,
+            red=red,
+            nir=nir,
+            vin=some_pars["index"].value,
+            params=nuisance,
+            param_names=parameters,
+        )
+        updating["busy"] = True
+        colour_dd.options = nuisance
+        colour_dd.value = nuisance[0]
+        updating["busy"] = False
+        draw()
+
     run_button.on_click(on_button_click)
+    gui_disp.children = gui_disp.children + (
+        widgets.HBox([colour_dd]),
+    )
     display(widgets.VBox([gui_disp, run_button, interact_out]))
     on_button_click(None)
 
 
 def canopy_vi_expt(
     x0=np.array(
-        [1.5, 40.0, 5.0, 0.0, 0.0, 0.0113, 0.0053, 1, 30.0, 4, 0, 0.01]
+        [1.5, 40.0, 5.0, 0.0, 0.0, 0.0113, 0.0053, 1, 30.0, 1, 0, 0.01]
     ),
     nuisance=["lai"],
     obs_noise=1e-4,
@@ -1712,8 +1815,8 @@ def canopy_vi_expt(
         "cm": 0.5,
         "lai": 8.05,
         "lidf": 90.0,
-        "rsoil": 5.0,
-        "psoil": 2.0,
+        "rsoil": 2.0,
+        "psoil": 1.0,
         "hspot": 0.5,
     },
     sza=0.0,
@@ -1813,8 +1916,7 @@ def canopy_vi_expt(
     red = np.clip(red, 0.01, 1)
     nir = np.clip(nir, 0.01, 1)
     if do_plots:
-        p = param_names.index(nuisance[0])
-        plot_vi_space(x[:, p], red, nir, vin)
+        plot_vi_space(x, red, nir, vin, nuisance, nuisance[0], param_names)
     return x, red, nir
 
 
